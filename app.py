@@ -13,11 +13,16 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)  # 初始化扩展，传入程序实例 app
 
+@app.context_processor
+def inject_user():  # 函数名可以随意修改
+    user = User.query.first()
+    return dict(user = user)  # 需要返回字典，等同于 return {'user': user}
+
 @app.route('/')
 def index():
-    name = User.query.first().name
+    # user = User.query.first()
     movies = Movie.query.all()
-    return render_template('index.html', name=name, movies=movies)
+    return render_template('index.html', movies=movies)
 
 @app.cli.command()  # 注册为命令，可以传入 name 参数来自定义命令
 @click.option('--drop', is_flag=True, help='Create after drop.')  # 设置选项
@@ -56,6 +61,12 @@ def forge():
 
     db.session.commit()
     click.echo('Done.')
+
+@app.errorhandler(404)  # 传入要处理的错误代码
+def page_not_found(err):  # 接受异常对象作为参数
+    # user = User.query.first()
+    return render_template('404.html', err = err), 404  # 返回模板和状态码
+
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key = True)
