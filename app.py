@@ -29,22 +29,26 @@ def index():
         year = request.form.get('year')
         submit = request.form.get('submit')
         # 验证数据
-        if not title or not year or len(year) > 4 or len(title) > 60:
+        if (year and len(year) != 4) or len(title) > 60:
             flash('Invalid input.')  # 显示错误提示
             return redirect(url_for('index'))  # 重定向回主页
         # 保存表单数据到数据库
         if submit == "Add":
+            if not year:
+                flash('Invalid input.')  # 显示错误提示
+                return redirect(url_for('index'))  # 重定向回主页
             movie = Movie(title=title, year=year)  # 创建记录
             db.session.add(movie)  # 添加到数据库会话
             db.session.commit()  # 提交数据库会话
             flash('Item created.')  # 显示成功创建的提示
         elif submit == "Delete":
-            movie = Movie.query.filter(Movie.title == title and Movie.year == year).first()
-            if (not movie):
-                flash('Invalid input.')  # 显示错误提示
+            movie = Movie.query.filter(Movie.title == title or Movie.year == year).all() # 【？】
+            if not movie:
+                flash('No matched items.')  # 显示错误提示
                 return redirect(url_for('index'))  # 重定向回主页
-            db.session.delete(movie)
-            db.session.commit()  # 提交数据库会话
+            for mov in movie:
+                db.session.delete(mov)
+                db.session.commit()  # 提交数据库会话
             flash('Item deleted.')  
         return redirect(url_for('index'))  # 重定向回主页
     
