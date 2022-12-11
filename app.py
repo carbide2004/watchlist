@@ -2,10 +2,10 @@ import os
 import sys
 import click
 
-from flask import request, url_for, redirect, flash
-from flask import Flask
-from flask import render_template
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
+from flask import request, url_for, redirect, flash, Flask, render_template
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 
@@ -14,6 +14,12 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'dev'  # 等同于 app.secret_key = 'dev'
 
 db = SQLAlchemy(app)  # 初始化扩展，传入程序实例 app
+login_manager = LoginManager(app)  # 实例化扩展类
+
+@login_manager.user_loader
+def load_user(user_id):  # 创建用户加载回调函数，接受用户 ID 作为参数
+    user = User.query.get(int(user_id))  # 用 ID 作为 User 模型的主键查询对应的用户
+    return user  # 返回用户对象
 
 @app.context_processor
 def inject_user():  # 函数名可以随意修改
@@ -54,6 +60,35 @@ def index():
     
     movies = Movie.query.all()
     return render_template('index.html', movies=movies)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash('Invalid input.')
+            return redirect(url_for('login'))
+
+        user = User.query.first()
+        # 验证用户名和密码是否一致
+        if username == user.username and user.validate_password(password):
+            login_user(user)  # 登入用户
+            flash('Login success.')
+            return redirect(url_for('index'))  # 重定向到主页
+
+        flash('Invalid username or password.')  # 如果验证失败，显示错误消息
+        return redirect(url_for('login'))  # 重定向回登录页面
+
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required  # 用于视图保护，后面会详细介绍
+def logout():
+    logout_user()  # 登出用户
+    flash('Goodbye.')
+    return redirect(url_for('index'))  # 重定向回首页
 
 @app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
 def edit(movie_id):
@@ -98,8 +133,6 @@ def forge():
     """Generate fake data."""
     db.create_all()
 
-    # 全局的两个变量移动到这个函数内
-    name = 'Carbide'
     movies = [
         {'title': 'My Neighbor Totoro', 'year': '1988'},
         {'title': 'Dead Poets Society', 'year': '1989'},
@@ -113,13 +146,33 @@ def forge():
         {'title': 'The Pork of Music', 'year': '2012'},
     ]
 
-    user = User(name=name)
-    db.session.add(user)
     for m in movies:
         movie = Movie(title=m['title'], year=m['year'])
         db.session.add(movie)
 
     db.session.commit()
+    click.echo('Done.')
+
+@app.cli.command()
+@click.option('--username', prompt=True, help='The username used to login.')
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='The password used to login.') 
+# prompt = True 用前面命令提示用户输入（--password => Password: ）
+def admin(username, password):
+    """Create user."""
+    db.create_all()
+
+    user = User.query.first()
+    if user is not None:
+        click.echo('Updating user...')
+        user.username = username
+        user.set_password(password)  # 设置密码
+    else:
+        click.echo('Creating user...')
+        user = User(username=username, access='Admin')
+        user.set_password(password)  # 设置密码
+        db.session.add(user)
+
+    db.session.commit()  # 提交数据库会话
     click.echo('Done.')
 
 @app.errorhandler(404)  # 传入要处理的错误代码
@@ -128,9 +181,16 @@ def page_not_found(err):  # 接受异常对象作为参数
     return render_template('404.html', err = err), 404  # 返回模板和状态码
 
 
-class User(db.Model):
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key = True)
-    name = db.Column(db.String(20))
+    access = db.Column(db.String(20))
+    username = db.Column(db.String(20))
+    password_hash = db.Column(db.String(128))
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 class Movie(db.Model):
     id = db.Column(db.Integer, primary_key = True)
