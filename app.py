@@ -2,7 +2,7 @@ import os
 import sys
 import click
 
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask import request, url_for, redirect, flash, Flask, render_template
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -15,21 +15,23 @@ app.config['SECRET_KEY'] = 'dev'  # 等同于 app.secret_key = 'dev'
 
 db = SQLAlchemy(app)  # 初始化扩展，传入程序实例 app
 login_manager = LoginManager(app)  # 实例化扩展类
+login_manager.login_view = 'login'
 
 @login_manager.user_loader
 def load_user(user_id):  # 创建用户加载回调函数，接受用户 ID 作为参数
     user = User.query.get(int(user_id))  # 用 ID 作为 User 模型的主键查询对应的用户
     return user  # 返回用户对象
 
-@app.context_processor
+@app.context_processor  # 使 user 在所有模板中可见
 def inject_user():  # 函数名可以随意修改
     user = User.query.first()
     return dict(user = user)  # 需要返回字典，等同于 return {'user': user}
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    # user = User.query.first()
     if request.method == 'POST':  # 判断是否是 POST 请求
+        if not current_user.is_authenticated:  # 如果当前用户未认证
+            return redirect(url_for('index'))  # 重定向到主页
         # 获取表单数据
         title = request.form.get('title')  # 传入表单对应输入字段的 name 值
         year = request.form.get('year')
@@ -73,7 +75,7 @@ def login():
 
         user = User.query.first()
         # 验证用户名和密码是否一致
-        if username == user.username and user.validate_password(password):
+        if username == user.username and user.check_password(password):
             login_user(user)  # 登入用户
             flash('Login success.')
             return redirect(url_for('index'))  # 重定向到主页
@@ -90,7 +92,29 @@ def logout():
     flash('Goodbye.')
     return redirect(url_for('index'))  # 重定向回首页
 
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    if request.method == 'POST':
+        name = request.form['name']
+
+        if not name or len(name) > 20:
+            flash('Invalid input.')
+            return redirect(url_for('settings'))
+
+        current_user.name = name
+        # current_user 会返回当前登录用户的数据库记录对象
+        # 等同于下面的用法
+        # user = User.query.first()
+        # user.name = name
+        db.session.commit()
+        flash('Settings updated.')
+        return redirect(url_for('index'))
+
+    return render_template('settings.html')
+
 @app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
+@login_required
 def edit(movie_id):
     movie = Movie.query.get_or_404(movie_id)
 
@@ -111,6 +135,7 @@ def edit(movie_id):
     return render_template('edit.html', movie=movie)  # 传入被编辑的电影记录
 
 @app.route('/movie/delete/<int:movie_id>', methods=['POST'])  # 限定只接受 POST 请求
+@login_required  # 登录保护
 def delete(movie_id):
     movie = Movie.query.get_or_404(movie_id)  # 获取电影记录
     db.session.delete(movie)  # 删除对应的记录
