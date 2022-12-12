@@ -1,31 +1,8 @@
-import os
-import sys
-import click
+from flask import request, url_for, redirect, flash, render_template
+from flask_login import current_user, login_user, logout_user, login_required
 
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask import request, url_for, redirect, flash, Flask, render_template
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-
-app = Flask(__name__)  # __name__ 是当前 Python 模块的名称。应用需要知道在哪里设置路径， 使用 __name__ 是一个方便的方法
-
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////' + os.path.join(app.root_path, 'data.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'dev'  # 等同于 app.secret_key = 'dev'
-
-db = SQLAlchemy(app)  # 初始化扩展，传入程序实例 app
-login_manager = LoginManager(app)  # 实例化扩展类
-login_manager.login_view = 'login'
-
-@login_manager.user_loader
-def load_user(user_id):  # 创建用户加载回调函数，接受用户 ID 作为参数
-    user = User.query.get(int(user_id))  # 用 ID 作为 User 模型的主键查询对应的用户
-    return user  # 返回用户对象
-
-@app.context_processor  # 使 user 在所有模板中可见
-def inject_user():  # 函数名可以随意修改
-    user = User.query.first()
-    return dict(user = user)  # 需要返回字典，等同于 return {'user': user}
+from watchlist import app, db
+from watchlist.models import User, Movie
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -142,82 +119,3 @@ def delete(movie_id):
     db.session.commit()  # 提交数据库会话
     flash('Item deleted.')
     return redirect(url_for('index'))  # 重定向回主页
-
-
-@app.cli.command()  # 注册为命令，可以传入 name 参数来自定义命令
-@click.option('--drop', is_flag=True, help='Create after drop.')  # 设置选项
-def initdb(drop):
-    """Initialize the database."""
-    if drop:  # 判断是否输入了选项
-        db.drop_all()
-    db.create_all()
-    click.echo('Initialized database.')  # 输出提示信息
-
-@app.cli.command()
-def forge():
-    """Generate fake data."""
-    db.create_all()
-
-    movies = [
-        {'title': 'My Neighbor Totoro', 'year': '1988'},
-        {'title': 'Dead Poets Society', 'year': '1989'},
-        {'title': 'A Perfect World', 'year': '1993'},
-        {'title': 'Leon', 'year': '1994'},
-        {'title': 'Mahjong', 'year': '1996'},
-        {'title': 'Swallowtail Butterfly', 'year': '1996'},
-        {'title': 'King of Comedy', 'year': '1999'},
-        {'title': 'Devils on the Doorstep', 'year': '1999'},
-        {'title': 'WALL-E', 'year': '2008'},
-        {'title': 'The Pork of Music', 'year': '2012'},
-    ]
-
-    for m in movies:
-        movie = Movie(title=m['title'], year=m['year'])
-        db.session.add(movie)
-
-    db.session.commit()
-    click.echo('Done.')
-
-@app.cli.command()
-@click.option('--username', prompt=True, help='The username used to login.')
-@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='The password used to login.') 
-# prompt = True 用前面命令提示用户输入（--password => Password: ）
-def admin(username, password):
-    """Create user."""
-    db.create_all()
-
-    user = User.query.first()
-    if user is not None:
-        click.echo('Updating user...')
-        user.username = username
-        user.set_password(password)  # 设置密码
-    else:
-        click.echo('Creating user...')
-        user = User(username=username, access='Admin')
-        user.set_password(password)  # 设置密码
-        db.session.add(user)
-
-    db.session.commit()  # 提交数据库会话
-    click.echo('Done.')
-
-@app.errorhandler(404)  # 传入要处理的错误代码
-def page_not_found(err):  # 接受异常对象作为参数
-    # user = User.query.first()
-    return render_template('404.html', err = err), 404  # 返回模板和状态码
-
-
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key = True)
-    access = db.Column(db.String(20))
-    username = db.Column(db.String(20))
-    password_hash = db.Column(db.String(128))
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-
-class Movie(db.Model):
-    id = db.Column(db.Integer, primary_key = True)
-    title = db.Column(db.String(60))  
-    year = db.Column(db.String(4)) 
